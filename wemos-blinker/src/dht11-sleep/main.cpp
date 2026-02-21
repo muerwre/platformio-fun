@@ -6,8 +6,8 @@
 #include "env.h"
 
 // settings
-#define SLEEP_DURATION_SECONDS 600 // 10 minutes
-#define RETRY_DURATION_SECONDS 10  // not more than 20 seconds!
+#define SLEEP_DURATION_SECONDS 20 * 60 // 10 minutes
+#define RETRY_DURATION_SECONDS 10      // not more than 20 seconds!
 
 // WIRING: VCC to 3.3V, GND to GND, DATA to D2
 #define DHT11_PIN D2
@@ -148,7 +148,7 @@ void loop()
   String tempTopic = String(mqtt_topic) + "/temperature";
   String humiTopic = String(mqtt_topic) + "/humidity";
 
-  if (mqtt_client.publish(tempTopic.c_str(), String(tempC, 2).c_str()))
+  if (mqtt_client.publish(tempTopic.c_str(), String(tempC, 2).c_str(), true))
   {
     Serial.printf("Published temperature to MQTT: %.2f°C --> %s\n", tempC, tempTopic.c_str());
   }
@@ -162,7 +162,7 @@ void loop()
   mqtt_client.loop();
   delay(50);
 
-  if (mqtt_client.publish(humiTopic.c_str(), String(humi, 2).c_str()))
+  if (mqtt_client.publish(humiTopic.c_str(), String(humi, 2).c_str(), true))
   {
     Serial.printf("Published humidity to MQTT: %.2f%% --> %s\n", humi, humiTopic.c_str());
   }
