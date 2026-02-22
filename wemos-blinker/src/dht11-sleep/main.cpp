@@ -29,6 +29,12 @@ const char *ntp_server = "pool.ntp.org";
 const long gmt_offset_sec = 7;     // GMT offset in seconds (adjust for your timezone)
 const int daylight_offset_sec = 0; // Daylight saving offset in seconds
 
+// Voltage level measurement settings
+const bool ENABLE_VOLTAGE_REPORTING = true; // Set to true to enable voltage measurement
+const int ADC_PIN = A0;                     // ADC pin for voltage measurement
+const float ADC_MAX_VALUE = 1023.0;         // Maximum ADC value (10-bit ADC)
+const float VOLTAGE_DIVIDER_RATIO = 3.9;    // Measure on the board
+
 DHT dht11(DHT11_PIN, DHT11);
 WiFiClient espClient;
 PubSubClient mqtt_client(espClient);
@@ -174,6 +180,29 @@ void loop()
   }
 
   mqtt_client.loop();
+
+  if (ENABLE_VOLTAGE_REPORTING)
+  {
+    int adcValue = analogRead(ADC_PIN);
+    float voltage = (adcValue / ADC_MAX_VALUE) * VOLTAGE_DIVIDER_RATIO;
+
+    String voltTopic = String(mqtt_topic) + "/voltage";
+    if (mqtt_client.publish(voltTopic.c_str(), String(voltage, 2).c_str(), true))
+    {
+      Serial.printf("Published voltage to MQTT: %.2f V --> %s\n", voltage, voltTopic.c_str());
+    }
+    mqtt_client.loop();
+    delay(50);
+
+    String adcTopic = String(mqtt_topic) + "/adc";
+    if (mqtt_client.publish(adcTopic.c_str(), String(adcValue).c_str(), true))
+    {
+      Serial.printf("Published ADC value to MQTT: %d --> %s\n", adcValue, adcTopic.c_str());
+    }
+
+    mqtt_client.loop();
+    delay(50);
+  }
 
   Serial.printf("Work's done, going to sleep for %d seconds...\n", SLEEP_DURATION_SECONDS);
 
