@@ -22,7 +22,7 @@ const char *mqtt_topic = MQTT_TOPIC;
 
 // NTP settings
 const char *ntp_server = "pool.ntp.org";
-const long gmt_offset_sec = 7;     // GMT offset in seconds (adjust for your timezone)
+const long gmt_offset_seconds = 7; // GMT offset in seconds (adjust for your timezone)
 const int daylight_offset_sec = 0; // Daylight saving offset in seconds
 
 DHT dht11(DHT11_PIN, DHT11);
@@ -45,7 +45,7 @@ void connectWiFi()
   Serial.println(WiFi.localIP());
 
   // Configure NTP
-  configTime(gmt_offset_sec, daylight_offset_sec, ntp_server);
+  configTime(gmt_offset_seconds, daylight_offset_sec, ntp_server);
   Serial.println("Waiting for NTP time sync...");
 
   time_t now = time(nullptr);

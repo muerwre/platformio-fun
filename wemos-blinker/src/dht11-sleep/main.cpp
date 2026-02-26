@@ -4,6 +4,9 @@
 #include <time.h>
 #include "DHT.h"
 #include "env.h"
+#include "voltage_reporter.h"
+#include "temp_reporter.h"
+#include "ntp_reporter.h"
 
 // settings
 #define SLEEP_DURATION_SECONDS 20 * 60 // 10 minutes
@@ -26,17 +29,14 @@ const char *mqtt_topic = MQTT_TOPIC;
 
 // NTP settings
 const char *ntp_server = "pool.ntp.org";
-const long gmt_offset_sec = 7;     // GMT offset in seconds (adjust for your timezone)
-const int daylight_offset_sec = 0; // Daylight saving offset in seconds
+const long gmt_offset_seconds = 7 * 3600; // GMT offset in seconds (adjust for your timezone)
+const int daylight_offset_seconds = 0;    // Daylight saving offset in seconds
+const bool enable_ntp_reporting = false;  // Set to true to enable NTP time reporting to MQTT
 
 // Voltage level measurement settings
-const bool ENABLE_VOLTAGE_REPORTING = true; // Set to true to enable voltage measurement
-const int ADC_PIN = A0;                     // ADC pin for voltage measurement
-const float ADC_MAX_VALUE = 1023.0;         // Maximum ADC value (10-bit ADC)
-const float VOLTAGE_DIVIDER_RATIO = 3.55;   // It's input volage, I suppose
-const float ADC_100_PERCENT = 1024;         // ~~3.55v
-const float ADC_0_PERCENT = 500;            // 2.25v
-const int MOSFET_CONTROL_PIN = D1;          // GPIO pin to open MOSFET between BATT and ADC (A0)
+const bool enable_voltage_reporting = true; // Set to true to enable voltage measurement
+const int adc_pin = A0;                     // ADC pin for voltage measurement
+const int mosfet_control_pin = D1;          // GPIO pin to open MOSFET between BATT and ADC (A0)
 
 DHT dht11(DHT11_PIN, DHT11);
 WiFiClient espClient;
@@ -54,37 +54,6 @@ void connectWiFi()
   }
 
   Serial.printf("\nWiFi connected, IP address: %s\n", WiFi.localIP().toString().c_str());
-
-  if (ENABLE_VOLTAGE_REPORTING)
-  {
-    pinMode(MOSFET_CONTROL_PIN, OUTPUT);
-  }
-
-  // Configure NTP
-  // configTime(gmt_offset_sec, daylight_offset_sec, ntp_server);
-  // Serial.println("Waiting for NTP time sync...");
-
-  // time_t now = time(nullptr);
-  // int retries = 0;
-  // while (now < 8 * 3600 * 2 && retries < 20)
-  // {
-  //   delay(500);
-  //   Serial.print(".");
-  //   now = time(nullptr);
-  //   retries++;
-  // }
-  // Serial.println();
-
-  // if (now >= 8 * 3600 * 2)
-  // {
-  //   Serial.println("NTP time synced!");
-  //   Serial.print("Current time: ");
-  //   Serial.println(ctime(&now));
-  // }
-  // else
-  // {
-  //   Serial.println("NTP sync failed, continuing with system time");
-  // }
 }
 
 void connectMQTT()
@@ -135,105 +104,30 @@ void loop()
     connectMQTT();
   }
   mqtt_client.loop();
-
   yield();
 
-  // read humidity
-  float humi = dht11.readHumidity();
-  // read temperature as Celsius
-  float tempC = dht11.readTemperature();
+  static TemperatureReporter tempReporter(mqtt_client, dht11, mqtt_topic);
+  int result = tempReporter.report();
+  yield();
 
-  if (isnan(humi) || isnan(tempC))
+  if (result != 0)
   {
-    Serial.println("Failed to read from DHT11 sensor!");
-    ESP.deepSleep(RETRY_DURATION_SECONDS * 1e6);
-
-    return;
-  }
-
-  Serial.printf("Humidity: %.2f%%, Temperature: %.2f°C\n", humi, tempC);
-
-  // Get current time
-  // time_t now = time(nullptr);
-  // struct tm *timeinfo = localtime(&now);
-  // char timeStr[64];
-  // strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", timeinfo);
-
-  String tempTopic = String(mqtt_topic) + "/temperature";
-  String humiTopic = String(mqtt_topic) + "/humidity";
-
-  if (mqtt_client.publish(tempTopic.c_str(), String(tempC, 2).c_str(), true))
-  {
-    Serial.printf("Published temperature to MQTT: %.2f°C --> %s\n", tempC, tempTopic.c_str());
-  }
-  else
-  {
-    Serial.println("Failed to publish temperature to MQTT");
     ESP.deepSleep(RETRY_DURATION_SECONDS * 1e6);
     return;
   }
 
-  mqtt_client.loop();
-  delay(50);
-
-  if (mqtt_client.publish(humiTopic.c_str(), String(humi, 2).c_str(), true))
+  if (enable_voltage_reporting)
   {
-    Serial.printf("Published humidity to MQTT: %.2f%% --> %s\n", humi, humiTopic.c_str());
-  }
-  else
-  {
-    Serial.println("Failed to publish humidity to MQTT");
-    ESP.deepSleep(RETRY_DURATION_SECONDS * 1e6);
-    return;
+    static VoltageReporter voltageReporter(mqtt_client, adc_pin, mosfet_control_pin, mqtt_topic);
+    voltageReporter.report();
+    yield();
   }
 
-  mqtt_client.loop();
-
-  if (ENABLE_VOLTAGE_REPORTING)
+  if (enable_ntp_reporting)
   {
-    digitalWrite(MOSFET_CONTROL_PIN, HIGH); // Power on the voltage divider circuit
-    delay(500);                             // Wait for the voltage to stabilize
-
-    int adcValue = analogRead(ADC_PIN);
-    float voltage = (adcValue / ADC_MAX_VALUE) * VOLTAGE_DIVIDER_RATIO;
-    float batteryPercentage = min(
-        100.0,
-        max(0.0,
-            (adcValue - ADC_0_PERCENT) / (ADC_100_PERCENT - ADC_0_PERCENT) * 100.0));
-
-    String voltTopic = String(mqtt_topic) + "/voltage";
-    if (mqtt_client.publish(voltTopic.c_str(), String(voltage, 2).c_str(), true))
-    {
-      Serial.printf("Published voltage to MQTT: %.2f V --> %s\n", voltage, voltTopic.c_str());
-    }
-    mqtt_client.loop();
-    delay(50);
-
-    String adcTopic = String(mqtt_topic) + "/adc";
-    if (mqtt_client.publish(adcTopic.c_str(), String(adcValue).c_str(), true))
-    {
-      Serial.printf("Published ADC value to MQTT: %d --> %s\n", adcValue, adcTopic.c_str());
-    }
-
-    mqtt_client.loop();
-    delay(50);
-
-    String percentTopic = String(mqtt_topic) + "/percentage";
-    if (mqtt_client.publish(percentTopic.c_str(), String(batteryPercentage, 2).c_str(), true))
-    {
-      Serial.printf("Published battery percentage to MQTT: %.2f%% --> %s\n", batteryPercentage, percentTopic.c_str());
-    }
-
-    mqtt_client.loop();
-    delay(50);
-
-    digitalWrite(MOSFET_CONTROL_PIN, LOW); // Power on the voltage divider circuit
-    delay(500);                            // Wait for the voltage to stabilize
-
-    if (batteryPercentage < 5)
-    {
-      // ESP.deepSleep(0); // Sleep indefinitely if battery is critically low
-    }
+    static NTPReporter ntpReporter(mqtt_client, mqtt_topic, gmt_offset_seconds, daylight_offset_seconds, ntp_server);
+    ntpReporter.report();
+    yield();
   }
 
   Serial.printf("Work's done, going to sleep for %d seconds...\n", SLEEP_DURATION_SECONDS);
