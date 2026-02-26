@@ -33,7 +33,10 @@ const int daylight_offset_sec = 0; // Daylight saving offset in seconds
 const bool ENABLE_VOLTAGE_REPORTING = true; // Set to true to enable voltage measurement
 const int ADC_PIN = A0;                     // ADC pin for voltage measurement
 const float ADC_MAX_VALUE = 1023.0;         // Maximum ADC value (10-bit ADC)
-const float VOLTAGE_DIVIDER_RATIO = 3.9;    // Measure on the board
+const float VOLTAGE_DIVIDER_RATIO = 3.55;   // It's input volage, I suppose
+const float ADC_100_PERCENT = 1024;         // ~~3.55v
+const float ADC_0_PERCENT = 500;            // 2.25v
+const int MOSFET_CONTROL_PIN = D1;          // GPIO pin to open MOSFET between BATT and ADC (A0)
 
 DHT dht11(DHT11_PIN, DHT11);
 WiFiClient espClient;
@@ -51,6 +54,11 @@ void connectWiFi()
   }
 
   Serial.printf("\nWiFi connected, IP address: %s\n", WiFi.localIP().toString().c_str());
+
+  if (ENABLE_VOLTAGE_REPORTING)
+  {
+    pinMode(MOSFET_CONTROL_PIN, OUTPUT);
+  }
 
   // Configure NTP
   // configTime(gmt_offset_sec, daylight_offset_sec, ntp_server);
@@ -183,8 +191,15 @@ void loop()
 
   if (ENABLE_VOLTAGE_REPORTING)
   {
+    digitalWrite(MOSFET_CONTROL_PIN, HIGH); // Power on the voltage divider circuit
+    delay(500);                             // Wait for the voltage to stabilize
+
     int adcValue = analogRead(ADC_PIN);
     float voltage = (adcValue / ADC_MAX_VALUE) * VOLTAGE_DIVIDER_RATIO;
+    float batteryPercentage = min(
+        100.0,
+        max(0.0,
+            (adcValue - ADC_0_PERCENT) / (ADC_100_PERCENT - ADC_0_PERCENT) * 100.0));
 
     String voltTopic = String(mqtt_topic) + "/voltage";
     if (mqtt_client.publish(voltTopic.c_str(), String(voltage, 2).c_str(), true))
@@ -202,6 +217,23 @@ void loop()
 
     mqtt_client.loop();
     delay(50);
+
+    String percentTopic = String(mqtt_topic) + "/percentage";
+    if (mqtt_client.publish(percentTopic.c_str(), String(batteryPercentage, 2).c_str(), true))
+    {
+      Serial.printf("Published battery percentage to MQTT: %.2f%% --> %s\n", batteryPercentage, percentTopic.c_str());
+    }
+
+    mqtt_client.loop();
+    delay(50);
+
+    digitalWrite(MOSFET_CONTROL_PIN, LOW); // Power on the voltage divider circuit
+    delay(500);                            // Wait for the voltage to stabilize
+
+    if (batteryPercentage < 5)
+    {
+      // ESP.deepSleep(0); // Sleep indefinitely if battery is critically low
+    }
   }
 
   Serial.printf("Work's done, going to sleep for %d seconds...\n", SLEEP_DURATION_SECONDS);
