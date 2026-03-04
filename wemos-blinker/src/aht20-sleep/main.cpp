@@ -2,18 +2,18 @@
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include <time.h>
-#include "DHT.h"
 #include "env.h"
 #include "voltage_reporter.h"
 #include "temp_reporter.h"
 #include "ntp_reporter.h"
 
 // settings
-#define SLEEP_DURATION_SECONDS 20 * 60 // 10 minutes
-#define RETRY_DURATION_SECONDS 10      // not more than 20 seconds!
+#define SLEEP_DURATION_SECONDS (20 * 60) // 20 minutes
+#define RETRY_DURATION_SECONDS 10        // not more than 20 seconds!
 
 // WIRING: VCC to 3.3V, GND to GND, DATA to D2
-#define DHT11_PIN D2
+#define SCL_PIN D1
+#define SDA_PIN D2
 
 // WiFi credentials
 const char *ssid = WIFI_SSID;
@@ -24,7 +24,7 @@ const char *mqtt_broker = MQTT_SERVER; // probably should be mdns?
 const int mqtt_port = MQTT_PORT;
 const char *mqtt_username = MQTT_USER;
 const char *mqtt_password = MQTT_PASS;
-const char *mqtt_client_id = "ESP8266_DHT11";
+const char *mqtt_client_id = "ESP8266_AHT20";
 const char *mqtt_topic = MQTT_TOPIC;
 
 // NTP settings
@@ -38,9 +38,9 @@ const bool enable_voltage_reporting = true; // Set to true to enable voltage mea
 const int adc_pin = A0;                     // ADC pin for voltage measurement
 const int mosfet_control_pin = D5;          // GPIO pin to open MOSFET between BATT and ADC (A0)
 
-DHT dht11(DHT11_PIN, DHT11);
 WiFiClient espClient;
 PubSubClient mqtt_client(espClient);
+TemperatureReporter *tempReporter = nullptr;
 
 void connectWiFi()
 {
@@ -82,9 +82,10 @@ void setup()
   Serial.begin(115200);
   delay(10);
   Serial.println("\nStarting sensor");
-  dht11.begin(); // initialize the sensor
   connectWiFi();
   mqtt_client.setServer(mqtt_broker, mqtt_port);
+  tempReporter = new TemperatureReporter(mqtt_client, SCL_PIN, SDA_PIN, MQTT_TOPIC);
+  tempReporter->initSensor();
 }
 
 void loop()
@@ -106,8 +107,7 @@ void loop()
   mqtt_client.loop();
   yield();
 
-  static TemperatureReporter tempReporter(mqtt_client, dht11, mqtt_topic);
-  int result = tempReporter.report();
+  int result = tempReporter->report();
   yield();
 
   if (result != 0)
