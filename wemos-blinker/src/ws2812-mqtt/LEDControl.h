@@ -7,9 +7,8 @@ template <uint8_t PIN, uint8_t WIDTH, uint8_t HEIGHT, EOrder COLOR_ORDER = GRB>
 class LEDControl
 {
 private:
-  static const uint16_t NUM_LEDS = WIDTH * HEIGHT;
-  CRGB leds_plus_safety_pixel[NUM_LEDS + 1];
-  CRGB *const leds;
+  static constexpr uint16_t NUM_LEDS = WIDTH * HEIGHT;
+  CRGB leds[NUM_LEDS];
 
   bool isOn = false;
   uint8_t currentBrightness = 16;
@@ -70,6 +69,8 @@ private:
   {
     if (isOn)
     {
+      Serial.printf("Updating %d LEDs to RGB: %d,%d,%d\n", NUM_LEDS, currentColor.r, currentColor.g, currentColor.b);
+
       for (uint16_t i = 0; i < NUM_LEDS; i++)
       {
         leds[i] = currentColor;
@@ -77,19 +78,25 @@ private:
     }
     else
     {
+      Serial.println("Turning off LEDs");
       fill_solid(leds, NUM_LEDS, CRGB::Black);
     }
+
+    // Disable interrupts during FastLED.show() to prevent WiFi interference
+    noInterrupts();
     FastLED.show();
+    interrupts();
   }
 
 public:
-  LEDControl() : leds(leds_plus_safety_pixel + 1)
+  LEDControl()
   {
   }
 
   template <template <uint8_t, EOrder> class CHIPSET>
   void begin()
   {
+    Serial.printf("Initializing LEDs: NUM_LEDS=%d, WIDTH=%d, HEIGHT=%d\n", NUM_LEDS, WIDTH, HEIGHT);
     FastLED.addLeds<CHIPSET, PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalSMD5050);
     FastLED.setBrightness(currentBrightness);
     FastLED.clear();
@@ -99,26 +106,27 @@ public:
   void setRGB(uint8_t r, uint8_t g, uint8_t b)
   {
     currentColor = CRGB(r, g, b);
-    updateLEDs();
   }
 
   void turnOn()
   {
     isOn = true;
-    updateLEDs();
   }
 
   void turnOff()
   {
     isOn = false;
-    updateLEDs();
   }
 
   void setBrightness(uint8_t brightness)
   {
     currentBrightness = brightness;
     FastLED.setBrightness(currentBrightness);
-    FastLED.show();
+  }
+
+  void refresh()
+  {
+    updateLEDs();
   }
 
   bool getState() const
