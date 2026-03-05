@@ -97,6 +97,7 @@ public:
   void begin()
   {
     Serial.printf("Initializing LEDs: NUM_LEDS=%d, WIDTH=%d, HEIGHT=%d\n", NUM_LEDS, WIDTH, HEIGHT);
+    FastLED.setMaxPowerInVoltsAndMilliamps(5, 700); // Limit power to 5V and 700mA
     FastLED.addLeds<CHIPSET, PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalSMD5050);
     FastLED.setBrightness(currentBrightness);
     FastLED.clear();
