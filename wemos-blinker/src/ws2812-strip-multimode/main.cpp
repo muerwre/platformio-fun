@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <FastLED.h>
 #include "rainbow.h"
-#include "flame.h"
+#include "flame/main.h"
 #define LED_PIN D3
 #define LED_COUNT 60
 #define COLOR_ORDER GRB
