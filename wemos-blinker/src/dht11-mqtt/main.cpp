@@ -3,7 +3,7 @@
 #include <PubSubClient.h>
 #include <time.h>
 #include "DHT.h"
-#include "env.h"
+#include "secrets.h"
 
 // WIRING: VCC to 3.3V, GND to GND, DATA to D2
 #define DHT11_PIN D2

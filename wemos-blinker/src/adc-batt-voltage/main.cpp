@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
-#include "env.h"
+#include "secrets.h"
 
 // WiFi credentials
 const char *ssid = WIFI_SSID;
