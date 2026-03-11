@@ -62,6 +62,9 @@ void loop()
   if (!remote.getStatus())
   {
     FastLED.clear(true);
+
+    delay(10000); // a.k.a. sleep :-)
+
     return;
   }
 
