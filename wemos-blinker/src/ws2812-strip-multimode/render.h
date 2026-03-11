@@ -7,8 +7,9 @@ enum Modes
   MODE_RAINBOW,
   MODE_FLAME,
   MODE_RAINBOW_FIRE,
-  MODE_FINE_FLAME,
-  MODES_COUNT, // bootstrap to get mode amount
+  MODE_FAST_FIRE,
+  MODE_SLOW_FIRE,
+  MODES_COUNT,
 };
 
 class Renderer
@@ -18,6 +19,8 @@ public:
 
   void render(uint32_t step, Modes mode, CRGB color)
   {
+    CHSV hsv = rgb2hsv_approximate(color);
+
     switch (mode)
     {
     case MODE_COLOR:
@@ -27,13 +30,16 @@ public:
       rainbow.show(step);
       break;
     case MODE_FLAME:
-      flame.show(step, PRESET_FIRE);
+      flame.show(step, hsv.hue, PRESET_FIRE);
       break;
     case MODE_RAINBOW_FIRE:
-      flame.show(step, PRESET_RAINBOW_FIRE);
+      flame.show(step, hsv.hue, PRESET_RAINBOW_FIRE);
       break;
-    case MODE_FINE_FLAME:
-      flame.show(step, PRESET_FINE_FLAME);
+    case MODE_FAST_FIRE:
+      flame.show(step, hsv.hue, PRESET_FAST_FIRE);
+      break;
+    case MODE_SLOW_FIRE:
+      flame.show(step, hsv.hue, PRESET_SLOW_FIRE);
       break;
     default:
       break;
