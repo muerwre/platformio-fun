@@ -79,6 +79,7 @@ void connectMQTT()
 
 void setup()
 {
+  Wire.begin(D2, D1);
   Serial.begin(74880);
   delay(10);
   Serial.println("\nStarting sensor");
