@@ -79,7 +79,7 @@ void connectMQTT()
 
 void setup()
 {
-  Serial.begin(115200);
+  Serial.begin(74880);
   delay(10);
   Serial.println("\nStarting sensor");
   connectWiFi();

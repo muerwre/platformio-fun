@@ -25,6 +25,7 @@ public:
 
     if (adcValue < ADC_MIN_REPORTING_VALUE)
     {
+      Serial.printf("ADC is below minimum reporting value, skipping voltage report: %d\n", adcValue);
       return 1;
     }
 
