@@ -21,11 +21,17 @@ public:
     float batteryPercentage = min(
         100.0,
         max(0.0,
-            (adcValue - ADC_0_PERCENT) / (ADC_100_PERCENT - ADC_0_PERCENT) * 100.0));
+            (adcValue - ADC_MIN_VALUE) / (ADC_MAX_VALUE - ADC_MIN_VALUE) * 100.0));
 
     if (adcValue < ADC_MIN_REPORTING_VALUE)
     {
       Serial.printf("ADC is below minimum reporting value, skipping voltage report: %d\n", adcValue);
+      return 1;
+    }
+
+    if (adcValue > ADC_MAX_VALUE)
+    {
+      Serial.printf("ADC value is above maximum, something's wrong: %d\n", adcValue);
       return 1;
     }
 
@@ -64,12 +70,13 @@ private:
 
   static constexpr float ADC_MAX_VALUE = 1023.0;       // Maximum ADC value (10-bit ADC)
   static constexpr float VOLTAGE_DIVIDER_RATIO = 3.55; // It's input volage, I suppose
-  static constexpr float ADC_100_PERCENT = 1024;       // ~~3.55v
-  static constexpr float ADC_0_PERCENT = 500;          // 2.25v
+  static constexpr float ADC_MIN_VALUE = 640;          // 2.7v
   static constexpr float ADC_MIN_REPORTING_VALUE = 50; // Below this ADC value, we won't report voltage
 
   int measure()
   {
+    Serial.printf("Value before enabling MOSFET: %d\n", analogRead(adcPin));
+
     if (mosfetControlPin >= 0)
     {
       pinMode(mosfetControlPin, OUTPUT);

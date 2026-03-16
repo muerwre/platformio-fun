@@ -28,7 +28,7 @@ Modes currentMode = MODE_RAINBOW;
 
 void setup()
 {
-  Serial.begin(115200);
+  Serial.begin(74880);
   FastLED.addLeds<CHIPSET, LED_PIN, COLOR_ORDER>(leds, LED_COUNT).setCorrection(TypicalSMD5050);
   FastLED.setBrightness(BRIGHTNESS);
   FastLED.setMaxPowerInVoltsAndMilliamps(5, 1000);
