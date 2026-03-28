@@ -5,11 +5,10 @@
 #include "secrets.h"
 #include "voltage_reporter.h"
 #include "temp_reporter.h"
-#include "ntp_reporter.h"
 
 // settings
-#define SLEEP_DURATION_SECONDS (1) // (seconds) sleep duration between successful measurements
-#define RETRY_DURATION_SECONDS 120 // (seconds) sleep duration between failed measurements
+#define SLEEP_DURATION_SECONDS (10 * 60) // (seconds) sleep duration between successful measurements
+#define RETRY_DURATION_SECONDS (1 * 60)  // (seconds) sleep duration between failed measurements
 
 // WIRING: VCC to 3.3V, GND to GND, DATA to D2
 #define SCL_PIN D1
@@ -30,16 +29,10 @@ const char *mqtt_topic = MQTT_TOPIC;
 // WiFi and MQTT connection settings
 const unsigned long connect_timeout = 30e3; // WiFi connection timeout in milliseconds
 
-// NTP settings
-const char *ntp_server = "pool.ntp.org";
-const long gmt_offset_seconds = 7 * 3600; // GMT offset in seconds (adjust for your timezone)
-const int daylight_offset_seconds = 0;    // Daylight saving offset in seconds
-const bool enable_ntp_reporting = false;  // Set to true to enable NTP time reporting to MQTT
-
 // Voltage level measurement settings
 const bool enable_voltage_reporting = true; // Set to true to enable voltage measurement
 const int adc_pin = A0;                     // ADC pin for voltage measurement
-const int mosfet_control_pin = D5;          // GPIO pin to open MOSFET between BATT and ADC (A0)
+const int mosfet_control_pin = -1;          // GPIO pin to open MOSFET between BATT and ADC (A0), -1 for disabled
 
 WiFiClient espClient;
 PubSubClient mqtt_client(espClient);
@@ -103,10 +96,14 @@ void setup()
   Serial.begin(74880);
   Wire.begin(SDA_PIN, SCL_PIN);
   tempReporter = new TemperatureReporter(mqtt_client, SCL_PIN, SDA_PIN, MQTT_TOPIC);
-  delay(500);
-  tempReporter->initSensor();
-  delay(10);
   Serial.println("\nStarting sensor");
+
+  if (tempReporter->initSensor() > 0)
+  {
+    Serial.printf("Error initializing sensor, going to sleep for %d seconds...\n", RETRY_DURATION_SECONDS);
+    ESP.deepSleep(RETRY_DURATION_SECONDS * 1e6);
+  }
+
   connectWiFi();
   mqtt_client.setServer(mqtt_broker, mqtt_port);
 }
@@ -140,15 +137,9 @@ void loop()
     yield();
   }
 
-  if (enable_ntp_reporting)
-  {
-    static NTPReporter ntpReporter(mqtt_client, mqtt_topic, gmt_offset_seconds, daylight_offset_seconds, ntp_server);
-    ntpReporter.report();
-    yield();
-  }
-
   if (result != 0)
   {
+    Serial.printf("Work's NOT done, going to sleep for %d seconds...\n", RETRY_DURATION_SECONDS);
     ESP.deepSleep(RETRY_DURATION_SECONDS * 1e6);
     return;
   }
