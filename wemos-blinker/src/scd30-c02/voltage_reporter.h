@@ -12,6 +12,7 @@ public:
                                        adcPin(adcPin),
                                        mosfetControlPin(mosfetControlPin)
   {
+    pinMode(adcPin, INPUT);
   }
 
   int report() override

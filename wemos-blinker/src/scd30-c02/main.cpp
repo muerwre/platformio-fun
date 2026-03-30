@@ -7,10 +7,10 @@
 #include "temp_reporter.h"
 
 // settings
-#define SLEEP_DURATION_SECONDS (10 * 60) // (seconds) sleep duration between successful measurements
+#define SLEEP_DURATION_SECONDS (15 * 60) // (seconds) sleep duration between successful measurements
 #define RETRY_DURATION_SECONDS (1 * 60)  // (seconds) sleep duration between failed measurements
 
-// WIRING: VCC to 3.3V, GND to GND, DATA to D2
+// WIRING: VCC to 3.3V, GND to GND, SCL to D1, SDA to D2
 #define SCL_PIN D1
 #define SDA_PIN D2
 
@@ -40,6 +40,9 @@ TemperatureReporter *tempReporter = nullptr;
 
 void connectWiFi()
 {
+  pinMode(adc_pin, INPUT);
+  int value = analogRead(adc_pin);
+  Serial.printf("ADC: %d", value);
   Serial.println("\nConnecting to WiFi...");
   WiFi.begin(ssid, password);
 
@@ -77,8 +80,8 @@ void connectMQTT()
     {
       Serial.print("MQTT connection failed, rc=");
       Serial.print(mqtt_client.state());
-      Serial.println(" - retrying in 5 seconds");
-      delay(5000);
+      Serial.println(" - retrying");
+      delay(1000);
       yield();
     }
   }

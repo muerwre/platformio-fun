@@ -5,6 +5,9 @@
 #include "reporter.h"
 
 #define RETRIES_COUNT 5
+#define MEASURE_INTERVAL 10 // seconds
+// we need some time to spin up sensor, that is a max wait time, could take less
+#define WARMUP_INTERVAL MEASURE_INTERVAL * 1.25
 
 class TemperatureReporter : Reporter
 {
@@ -23,68 +26,33 @@ public:
     // https://forums.adafruit.com/viewtopic.php?t=217459
     Wire.setClock(10000L); // 10kHz
 
-    if (!scd30.begin())
+    while (!scd30.begin() && retries > 0)
     {
-      while (1 && retries > 0)
-      {
-        Serial.printf("Failed to find SCD30 chip, retrying... (%d retries left)\n", retries);
-        Wire.begin(sdaPin, sclPin);
-        delay(1000);
-        retries--;
-      }
-
-      if (retries == 0)
-      {
-        Serial.println("Failed to find SCD30 chip after retries, giving up");
-        return 1;
-      }
-    }
-    else
-    {
-      sensor_available = true;
-      Serial.printf("Sensor found! Measurement Interval: %d seconds\n", scd30.getMeasurementInterval());
-      return 0;
+      Serial.printf("Failed to find SCD30 chip, retrying... (%d retries left)\n", retries);
+      Wire.begin(sdaPin, sclPin);
+      delay(1000);
+      mqtt.loop();
+      retries--;
     }
 
-    // if (!scd30.setMeasurementInterval(MEASURE_INTERVAL))
-    // {
-    //   Serial.println("Failed to set measurement interval");
-    //   while (1)
-    //   {
-    //     delay(10);
-    //   }
-    // }
+    if (retries <= 0)
+    {
+      Serial.println("Failed to find SCD30 chip after retries, giving up");
+      return 1;
+    }
 
-    Serial.printf("New measurement Interval: %d seconds\n", scd30.getMeasurementInterval());
+    scd30.setMeasurementInterval(2);
+
+    sensor_available = true;
+    Serial.printf("Sensor found! Measurement Interval: %d seconds\n", scd30.getMeasurementInterval());
+
     return 0;
   }
 
   int report() override
   {
-    if (!sensor_available)
+    if (measure() != 0)
     {
-      Serial.println("Sensor not available, skipping report");
-      return 1;
-    }
-
-    Serial.print("Waiting for data from sensor");
-    unsigned long now = millis();
-    while (!scd30.dataReady() && millis() - now < 3e3) // wait for 3 seconds in case of trouble
-    {
-      Serial.print(".");
-      delay(1000);
-    }
-    Serial.println();
-
-    if (!scd30.dataReady())
-    {
-      Serial.println("Data not ready, skipping report");
-      return 1;
-    }
-
-    if (!scd30.read())
-    {
-      Serial.println("Error reading sensor data");
       return 1;
     }
 
@@ -103,7 +71,6 @@ public:
     Serial.printf("Published temperature to MQTT: %.2f°C --> %s\n", scd30.temperature, tempTopic.c_str());
 
     mqtt.loop();
-    delay(50);
 
     if (!mqtt.publish(humiTopic.c_str(), String(scd30.relative_humidity, 2).c_str(), true))
     {
@@ -113,7 +80,6 @@ public:
     Serial.printf("Published humidity to MQTT: %.2f%% --> %s\n", scd30.relative_humidity, humiTopic.c_str());
 
     mqtt.loop();
-    delay(50);
 
     if (scd30.CO2 > double(0) && !mqtt.publish(co2Topic.c_str(), String(scd30.CO2, 2).c_str(), true))
     {
@@ -123,10 +89,17 @@ public:
     Serial.printf("Published CO2 to MQTT: %.2f ppm --> %s\n", scd30.CO2, co2Topic.c_str());
 
     mqtt.loop();
-    delay(50);
 
-    // idk, sometimes it just hangs after a few reports, so reset the sensor to see if that helps
-    // scd30.reset();
+    // doing this at the end of report gives us a change to catch next measurement
+    // earlier than MEASURE_INTERVAL, because setting it at the beginning of report would cause the
+    // first measurement to be ready after MEASURE_INTERVAL
+    if (!scd30.setMeasurementInterval(MEASURE_INTERVAL))
+    {
+      Serial.println("Failed to set measurement interval");
+    }
+
+    scd30.startContinuousMeasurement();
+    Serial.printf("New measurement Interval: %d seconds\n", scd30.getMeasurementInterval());
 
     return 0;
   }
@@ -136,4 +109,52 @@ private:
   uint8_t sdaPin;
   Adafruit_SCD30 scd30;
   bool sensor_available = false;
+
+  int measure()
+  {
+    if (!sensor_available)
+    {
+      Serial.println("Sensor not available, skipping report");
+      return 1;
+    }
+
+    // sensor warmup can take up to MEASURE_INTERVAL seconds, we wait here
+
+    Serial.print("Waiting for data from sensor");
+    unsigned long now = millis();
+    while (!scd30.dataReady() && millis() - now < WARMUP_INTERVAL * 1e3)
+    {
+      Serial.print(".");
+      delay(300);
+      mqtt.loop();
+    }
+    Serial.printf(" (took %d seconds)\n", int((millis() - now) / 1000));
+
+    if (!scd30.dataReady())
+    {
+      Serial.println("Data not ready, skipping report");
+      return 1;
+    }
+
+    // first reports are often invalid, wait until good ones
+
+    now = millis();
+    Serial.print("Reading data from sensor");
+    while (!scd30.read() || scd30.CO2 == 0 || !isfinite(scd30.CO2))
+    {
+      Serial.print(".");
+      delay(1000);
+      mqtt.loop();
+
+      if (millis() - now > WARMUP_INTERVAL * 1e3)
+      {
+        Serial.println("Failed to read valid data from sensor after retries, skipping report");
+        return 1;
+      }
+    }
+
+    Serial.printf(" (took %d seconds)\n", int((millis() - now) / 1000));
+
+    return 0;
+  }
 };
