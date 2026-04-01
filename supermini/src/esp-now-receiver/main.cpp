@@ -98,7 +98,7 @@ void setup()
     return;
   }
 
-  esp_now_set_pmk(PEER_KEY);
+  // esp_now_set_pmk(PEER_KEY);
 
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);

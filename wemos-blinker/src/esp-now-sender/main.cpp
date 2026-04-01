@@ -8,7 +8,7 @@
 
 // Must match the receiver's WiFi channel
 const uint8_t CHANNEL = 9;
-const uint32_t TX_TIMEOUT = 5; // seconds between sends
+const uint32_t TX_TIMEOUT = 1; // seconds between sends
 
 // Receiver MAC address — update to match your supermini
 uint8_t RECEIVER_ADDR[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
@@ -32,6 +32,7 @@ void onSent(uint8_t *mac, uint8_t status)
 
 void setup()
 {
+  pinMode(LED_BUILTIN, OUTPUT);
   Serial.begin(74880);
 
   WiFi.mode(WIFI_STA);
@@ -49,7 +50,8 @@ void setup()
   esp_now_set_self_role(ESP_NOW_ROLE_CONTROLLER);
   esp_now_register_send_cb(onSent);
 
-  esp_now_add_peer(RECEIVER_ADDR, ESP_NOW_ROLE_SLAVE, CHANNEL, (uint8_t *)PEER_KEY, 16);
+  // esp_now_add_peer(RECEIVER_ADDR, ESP_NOW_ROLE_SLAVE, CHANNEL, (uint8_t *)PEER_KEY, 16);
+  esp_now_add_peer(RECEIVER_ADDR, ESP_NOW_ROLE_SLAVE, CHANNEL, NULL, 16);
 
   Serial.printf("ESP-NOW sender ready, TX every %ds on channel %d\n", TX_TIMEOUT, CHANNEL);
 }
@@ -63,5 +65,8 @@ void loop()
   Serial.printf("Sending value: %d\n", msg.value);
   esp_now_send(RECEIVER_ADDR, (uint8_t *)&msg, sizeof(msg));
 
+  digitalWrite(LED_BUILTIN, LOW);
+  delay(300);
+  digitalWrite(LED_BUILTIN, HIGH);
   delay(TX_TIMEOUT * 1000);
 }
