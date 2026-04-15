@@ -18,24 +18,10 @@ public:
   int report() override
   {
     int adcValue = measure();
+    int mv = analogReadMilliVolts(adcPin);
+    float voltage = (mv / 1000.0) * VOLTAGE_DIVIDER_RATIO;
 
-    float voltage = (adcValue / ADC_MAX_VALUE) * VOLTAGE_DIVIDER_RATIO;
-    float batteryPercentage = min(
-        100.0,
-        max(0.0,
-            (adcValue - ADC_MIN_VALUE) / (ADC_MAX_VALUE - ADC_MIN_VALUE) * 100.0));
-
-    if (adcValue < ADC_MIN_REPORTING_VALUE)
-    {
-      Serial.printf("ADC is below minimum reporting value, skipping voltage report: %d\n", adcValue);
-      return 1;
-    }
-
-    if (adcValue > ADC_MAX_VALUE)
-    {
-      Serial.printf("ADC value is above maximum, something's wrong: %d\n", adcValue);
-      return 1;
-    }
+    Serial.printf("ADC: %d\tmV: %d\tVoltage: %.2f V\n", adcValue, mv, voltage);
 
     String voltTopic = String(mqttTopic) + "/voltage";
     if (mqtt.publish(voltTopic.c_str(), String(voltage, 2).c_str(), true))
@@ -54,15 +40,6 @@ public:
     mqtt.loop();
     delay(50);
 
-    String percentTopic = String(mqttTopic) + "/percentage";
-    if (mqtt.publish(percentTopic.c_str(), String(batteryPercentage, 2).c_str(), true))
-    {
-      Serial.printf("Published battery percentage to MQTT: %.2f%% --> %s\n", batteryPercentage, percentTopic.c_str());
-    }
-
-    mqtt.loop();
-    delay(50);
-
     return 0;
   }
 
@@ -70,10 +47,7 @@ private:
   int adcPin;
   int mosfetControlPin;
 
-  static constexpr float ADC_MAX_VALUE = 1023.0;       // Maximum ADC value (10-bit ADC)
-  static constexpr float VOLTAGE_DIVIDER_RATIO = 3.55; // It's input volage, I suppose
-  static constexpr float ADC_MIN_VALUE = 640;          // 2.7v
-  static constexpr float ADC_MIN_REPORTING_VALUE = 50; // Below this ADC value, we won't report voltage
+  static constexpr float VOLTAGE_DIVIDER_RATIO = 2.039; // (R1 + R2) / R2, calibrated
 
   int measure()
   {

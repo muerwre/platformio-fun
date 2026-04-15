@@ -2,15 +2,20 @@
 #include <PubSubClient.h>
 #include <time.h>
 #include "secrets.h"
+#include "mqtt_control.h"
 #include "voltage_reporter.h"
 #include "temp_reporter.h"
 #include <WiFi.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
+#include <Adafruit_NeoPixel.h>
+
+#define LED_PIN 8
+Adafruit_NeoPixel led(1, LED_PIN, NEO_GRB + NEO_KHZ800);
 
 // settings
-#define SLEEP_DURATION_SECONDS (0.1 * 60) // (seconds) sleep duration between successful measurements
-#define RETRY_DURATION_SECONDS (0.1 * 60) // (seconds) sleep duration between failed measurements
+#define SLEEP_DURATION_SECONDS (20 * 60) // (seconds) sleep duration between successful measurements
+#define RETRY_DURATION_SECONDS (2 * 60)  // (seconds) sleep duration between failed measurements
 
 // WIRING: VCC to 3.3V, GND to GND
 #define SCL_PIN SCL1 // 7
@@ -39,6 +44,7 @@ const int mosfet_control_pin = -1;          // GPIO pin to open MOSFET between B
 WiFiClient espClient;
 PubSubClient mqtt_client(espClient);
 TemperatureReporter *tempReporter = nullptr;
+MqttControl mqttControl(mqtt_client, MQTT_TOPIC, SLEEP_DURATION_SECONDS);
 
 void connectWiFi()
 {
@@ -105,6 +111,14 @@ void connectMQTT()
 
 void setup()
 {
+  led.begin();
+  led.setBrightness(10);
+  led.setPixelColor(0, led.Color(0, 0, 255));
+  led.show();
+  delay(100);
+  led.setPixelColor(0, led.Color(0, 0, 0));
+  led.show();
+
   Serial.begin(74880);
   Wire.begin(SDA_PIN, SCL_PIN);
   tempReporter = new TemperatureReporter(mqtt_client, SCL_PIN, SDA_PIN, MQTT_TOPIC);
@@ -122,7 +136,10 @@ void setup()
 
   connectWiFi();
   mqtt_client.setServer(mqtt_broker, mqtt_port);
+  mqtt_client.setCallback([](char *topic, byte *payload, unsigned int length)
+                          { mqttControl.callback(topic, payload, length); });
   connectMQTT();
+  mqttControl.readUpdateInterval();
 }
 
 void loop()
@@ -167,14 +184,15 @@ void loop()
     return;
   }
 
-  Serial.printf("Work's done, going to sleep for %d seconds...\n", SLEEP_DURATION_SECONDS);
+  long sleepSeconds = mqttControl.getSleepDurationSeconds();
+  Serial.printf("Work's done, going to sleep for %ld seconds...\n", sleepSeconds);
 
   mqtt_client.loop();
   delay(200);
 
-  if (SLEEP_DURATION_SECONDS > 0)
+  if (sleepSeconds > 0)
   {
     mqtt_client.disconnect();
-    ESP.deepSleep(SLEEP_DURATION_SECONDS * 1e6);
+    ESP.deepSleep(sleepSeconds * 1e6);
   }
 }
