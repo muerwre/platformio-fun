@@ -25,6 +25,14 @@ public:
       put((v >> (8 * i)) & 0xFF); // little-endian
   }
 
+  // protobuf float = fixed32 carrying the IEEE-754 bit pattern.
+  void float32(uint32_t field, float v)
+  {
+    uint32_t bits;
+    memcpy(&bits, &v, sizeof(bits));
+    fixed32(field, bits);
+  }
+
   void bytes(uint32_t field, const uint8_t *d, size_t n)
   {
     tag(field, 2);

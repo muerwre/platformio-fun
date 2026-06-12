@@ -1,5 +1,6 @@
 #pragma once
 #include <Adafruit_NeoPixel.h>
+#include <driver/gpio.h>
 
 // Onboard WS2812 RGB LED on the ESP32-C6 Supermini.
 //
@@ -21,13 +22,26 @@ public:
   };
 
   StatusLed(uint8_t pin, uint8_t brightness = 10)
-      : led(1, pin, NEO_GRB + NEO_KHZ800), brightness(brightness) {}
+      : led(1, pin, NEO_GRB + NEO_KHZ800), pin(pin), brightness(brightness) {}
 
   void begin()
   {
+    // Release any pin hold left over from the previous deep sleep.
+    gpio_hold_dis((gpio_num_t)pin);
+
     led.begin();
     led.setBrightness(brightness);
     show(0);
+  }
+
+  // Turn the LED off and latch the data line low so it stays dark through deep
+  // sleep (an undriven WS2812 data line can otherwise pick up noise and relight).
+  void prepareForSleep()
+  {
+    setMode(OFF);
+    update();
+    // C6 supports single-IO hold in deep sleep, so this alone keeps it dark.
+    gpio_hold_en((gpio_num_t)pin);
   }
 
   void setMode(Mode next)
@@ -48,7 +62,7 @@ public:
       blink(led.Color(0, 0, 255)); // blue
       break;
     case PAIRED:
-      blink(led.Color(0, 255, 0)); // green
+      show(led.Color(0, 255, 0)); // solid green
       break;
     case PAIR_ERROR:
       show(led.Color(255, 0, 0)); // solid red
@@ -64,6 +78,7 @@ private:
   static constexpr uint32_t BLINK_INTERVAL_MS = 300;
 
   Adafruit_NeoPixel led;
+  uint8_t pin;
   uint8_t brightness;
   Mode mode = OFF;
   uint32_t lastToggle = 0;

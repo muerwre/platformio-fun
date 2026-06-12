@@ -68,40 +68,34 @@ public:
     toRadio->writeValue(w.data(), w.size(), true);
   }
 
-  // Send a text message to another node (its node number, e.g. 0x433a1b2c)
-  // on the given channel index (0 = primary).
+  // Send a text message to another node (or broadcast) on the given channel.
   void sendText(uint32_t dest, const char *text, uint8_t channel = 0)
   {
-    // Data{ portnum = TEXT_MESSAGE_APP, payload = text }
-    uint8_t dataBuf[64];
-    ProtoWriter data(dataBuf, sizeof(dataBuf));
-    data.varint(1, PORTNUM_TEXT_MESSAGE); // portnum
-    data.string(2, text);                 // payload
+    sendData(dest, channel, PORTNUM_TEXT_MESSAGE,
+             (const uint8_t *)text, strlen(text), text);
+  }
 
-    // MeshPacket{ to, channel, id, hop_limit, want_ack, decoded = Data }
-    uint8_t pktBuf[96];
-    ProtoWriter pkt(pktBuf, sizeof(pktBuf));
-    bool broadcast = (dest == BROADCAST_ADDR);
-    uint32_t id = esp_random(); // must be unique per message — the node drops
-    if (id == 0)                // duplicate ids as "already seen recently"
-      id = 1;
-    pkt.fixed32(2, dest);        // to (0xFFFFFFFF = channel broadcast)
-    if (channel != 0)            // proto3 omits the zero default
-      pkt.varint(3, channel);    // channel index
-    pkt.fixed32(6, id);          // packet id (random, non-zero)
-    pkt.varint(9, DEFAULT_HOPS); // hop_limit
-    if (!broadcast)              // ack only makes sense for direct messages
-      pkt.varint(10, 1);         // want_ack
-    pkt.message(4, data);        // decoded
+  // Send temperature/humidity/pressure as an EnvironmentMetrics telemetry packet.
+  // NAN fields are omitted (e.g. no BMP280 -> no pressure).
+  void sendTelemetry(uint32_t dest, float temp, float humidity, float pressure,
+                     uint8_t channel = 0)
+  {
+    // EnvironmentMetrics{ temperature=1, relative_humidity=2, barometric_pressure=3 }
+    uint8_t envBuf[32];
+    ProtoWriter env(envBuf, sizeof(envBuf));
+    if (!isnan(temp))
+      env.float32(1, temp);
+    if (!isnan(humidity))
+      env.float32(2, humidity);
+    if (!isnan(pressure))
+      env.float32(3, pressure);
 
-    // ToRadio{ packet = MeshPacket }
-    uint8_t outBuf[128];
-    ProtoWriter out(outBuf, sizeof(outBuf));
-    out.message(1, pkt);
+    // Telemetry{ environment_metrics = 3 }
+    uint8_t telBuf[48];
+    ProtoWriter tel(telBuf, sizeof(telBuf));
+    tel.message(3, env);
 
-    bool ok = toRadio->writeValue(out.data(), out.size(), true);
-    Serial.printf("MeshNode: sent \"%s\" to !%08x on ch%u (id=0x%08x) [%u bytes, ok=%d]\n",
-                  text, dest, channel, id, (unsigned)out.size(), ok);
+    sendData(dest, channel, PORTNUM_TELEMETRY, tel.data(), tel.size(), "telemetry");
   }
 
   // Drain and decode whatever the node has queued. Call often from loop().
@@ -135,7 +129,44 @@ private:
   static constexpr uint32_t CONFIG_NONCE = 0x1A2B3C4D;
   static constexpr int MAX_READS_PER_POLL = 64;
   static constexpr uint32_t PORTNUM_TEXT_MESSAGE = 1; // PortNum.TEXT_MESSAGE_APP
+  static constexpr uint32_t PORTNUM_TELEMETRY = 67;   // PortNum.TELEMETRY_APP
   static constexpr uint32_t DEFAULT_HOPS = 3;
+
+  // Build ToRadio{ MeshPacket{ Data{ portnum, payload } } } and write it.
+  void sendData(uint32_t dest, uint8_t channel, uint32_t portnum,
+                const uint8_t *payload, size_t payloadLen, const char *label)
+  {
+    // Data{ portnum, payload }
+    uint8_t dataBuf[96];
+    ProtoWriter data(dataBuf, sizeof(dataBuf));
+    data.varint(1, portnum);
+    data.bytes(2, payload, payloadLen);
+
+    // MeshPacket{ to, channel, id, hop_limit, want_ack, decoded = Data }
+    uint8_t pktBuf[128];
+    ProtoWriter pkt(pktBuf, sizeof(pktBuf));
+    bool broadcast = (dest == BROADCAST_ADDR);
+    uint32_t id = esp_random(); // must be unique per message — the node drops
+    if (id == 0)                // duplicate ids as "already seen recently"
+      id = 1;
+    pkt.fixed32(2, dest);        // to (0xFFFFFFFF = channel broadcast)
+    if (channel != 0)            // proto3 omits the zero default
+      pkt.varint(3, channel);    // channel index
+    pkt.fixed32(6, id);          // packet id (random, non-zero)
+    pkt.varint(9, DEFAULT_HOPS); // hop_limit
+    if (!broadcast)              // ack only makes sense for direct messages
+      pkt.varint(10, 1);         // want_ack
+    pkt.message(4, data);        // decoded
+
+    // ToRadio{ packet = MeshPacket }
+    uint8_t outBuf[160];
+    ProtoWriter out(outBuf, sizeof(outBuf));
+    out.message(1, pkt);
+
+    bool ok = toRadio->writeValue(out.data(), out.size(), true);
+    Serial.printf("MeshNode: sent %s to !%08x on ch%u (id=0x%08x) [%u bytes, ok=%d]\n",
+                  label, dest, channel, id, (unsigned)out.size(), ok);
+  }
 
   // FromRadio field numbers (payload_variant oneof)
   enum

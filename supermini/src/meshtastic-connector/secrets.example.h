@@ -13,3 +13,6 @@
 
 // Channel index to send on (0 = primary channel)
 #define MESH_CHANNEL 0
+
+// Minutes of deep sleep between messages (e.g. 60 = once per hour; use 1 for debugging)
+#define MESH_SEND_INTERVAL_MIN 60

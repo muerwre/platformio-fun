@@ -27,6 +27,7 @@ public:
     clientCb.pin = pin;
 
     NimBLEDevice::init("supermini-mesh");
+    NimBLEDevice::deleteAllBonds(); // clear stale bond data from prior attempts
     // Meshtastic packets exceed the 23-byte default ATT MTU; ask for a big one
     // so a ToRadio write fits in a single ATT operation (like the phone app does).
     NimBLEDevice::setMTU(517);
@@ -130,6 +131,10 @@ private:
       NimBLEDevice::deleteClient(client);
       return false;
     }
+
+    // Widen the supervision timeout so the SMP exchange can finish.
+    client->updateConnParams(12, 12, 0, 400);
+    delay(100);
 
     Serial.println("Connected, starting secure pairing...");
     if (!client->secureConnection())
