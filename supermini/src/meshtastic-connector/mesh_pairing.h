@@ -27,7 +27,10 @@ public:
     clientCb.pin = pin;
 
     NimBLEDevice::init("supermini-mesh");
-    NimBLEDevice::deleteAllBonds(); // clear stale bond data from prior attempts
+    // NB: bonds live in NVS and survive deep sleep + power cycles. We keep them
+    // on purpose so we only do the full PIN pairing once; later wakes re-encrypt
+    // from the stored key (no PIN). A stale bond is handled in connectAndBond().
+    Serial.printf("Stored BLE bonds: %d\n", NimBLEDevice::getNumBonds());
     // Meshtastic packets exceed the 23-byte default ATT MTU; ask for a big one
     // so a ToRadio write fits in a single ATT operation (like the phone app does).
     NimBLEDevice::setMTU(517);
@@ -136,17 +139,47 @@ private:
     client->updateConnParams(12, 12, 0, 400);
     delay(100);
 
-    Serial.println("Connected, starting secure pairing...");
+    bool hadBond = NimBLEDevice::isBonded(addr);
+    Serial.println(hadBond ? "Existing bond, re-encrypting..."
+                           : "No bond, starting secure pairing...");
+
+    // secureConnection() re-uses the stored bond when one exists (no PIN), or
+    // runs the full PIN pairing otherwise. If a bond we thought was valid is
+    // rejected, the node likely forgot us — drop it and pair fresh once.
     if (!client->secureConnection())
     {
-      Serial.println("Pairing failed");
-      client->disconnect();
-      return false;
+      if (hadBond)
+      {
+        Serial.println("Stale bond rejected, deleting and re-pairing...");
+        NimBLEDevice::deleteBond(addr);
+        client->disconnect();
+        delay(100);
+        if (!client->connect(addr))
+        {
+          Serial.println("Reconnect failed");
+          NimBLEDevice::deleteClient(client);
+          return false;
+        }
+        client->updateConnParams(12, 12, 0, 400);
+        delay(100);
+        if (!client->secureConnection())
+        {
+          Serial.println("Pairing failed");
+          client->disconnect();
+          return false;
+        }
+      }
+      else
+      {
+        Serial.println("Pairing failed");
+        client->disconnect();
+        return false;
+      }
     }
 
     NimBLEConnInfo info = client->getConnInfo();
     bool ok = info.isEncrypted();
-    Serial.printf("Pairing %s (encrypted=%d, bonded=%d)\n",
+    Serial.printf("Link secure %s (encrypted=%d, bonded=%d)\n",
                   ok ? "SUCCESS" : "FAILED", info.isEncrypted(), info.isBonded());
     return ok;
   }
