@@ -83,7 +83,9 @@ void setup()
     }
     else if (sensorOk)
     {
-      mesh.sendTelemetry(reading.temperature, reading.humidity, reading.pressure);
+      mesh.sendTelemetry(reading.temperature, reading.humidity, reading.pressure, reading.voltage);
+      Serial.printf("Sent: temp=%.2f°C hum=%.2f%% pres=%.2fhPa volt=%.3fV\n",
+                    reading.temperature, reading.humidity, reading.pressure, reading.voltage);
     }
     else
     {

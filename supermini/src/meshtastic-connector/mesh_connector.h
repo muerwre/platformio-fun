@@ -66,10 +66,10 @@ public:
     node.sendText(MESH_DEST_ID, text, destChannel());
   }
 
-  // Send temp/humidity/pressure as a telemetry (EnvironmentMetrics) packet.
-  void sendTelemetry(float temp, float humidity, float pressure)
+  // Send temp/humidity/pressure/voltage as a telemetry (EnvironmentMetrics) packet.
+  void sendTelemetry(float temp, float humidity, float pressure, float voltage)
   {
-    node.sendTelemetry(MESH_DEST_ID, temp, humidity, pressure, destChannel());
+    node.sendTelemetry(MESH_DEST_ID, temp, humidity, pressure, voltage, destChannel());
   }
 
   // Show the outcome LED for 10 s (green = sent, red = error), then go dark

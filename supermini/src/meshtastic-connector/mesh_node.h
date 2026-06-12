@@ -75,13 +75,14 @@ public:
              (const uint8_t *)text, strlen(text), text);
   }
 
-  // Send temperature/humidity/pressure as an EnvironmentMetrics telemetry packet.
+  // Send temperature/humidity/pressure/voltage as an EnvironmentMetrics telemetry packet.
   // NAN fields are omitted (e.g. no BMP280 -> no pressure).
+  // Voltage is stuffed into the lux field (9) to avoid colliding with the parent node.
   void sendTelemetry(uint32_t dest, float temp, float humidity, float pressure,
-                     uint8_t channel = 0)
+                     float voltage, uint8_t channel = 0)
   {
-    // EnvironmentMetrics{ temperature=1, relative_humidity=2, barometric_pressure=3 }
-    uint8_t envBuf[32];
+    // EnvironmentMetrics{ temperature=1, relative_humidity=2, barometric_pressure=3, lux=9 }
+    uint8_t envBuf[40];
     ProtoWriter env(envBuf, sizeof(envBuf));
     if (!isnan(temp))
       env.float32(1, temp);
@@ -89,6 +90,8 @@ public:
       env.float32(2, humidity);
     if (!isnan(pressure))
       env.float32(3, pressure);
+    if (!isnan(voltage))
+      env.float32(9, voltage);
 
     // Telemetry{ environment_metrics = 3 }
     uint8_t telBuf[48];
