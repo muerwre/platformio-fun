@@ -45,14 +45,23 @@ public:
 
 private:
   static constexpr int ADC_PIN = A0;
-  static constexpr float VOLTAGE_DIVIDER_RATIO = 6.76f; // (R1 + R2) / R2, calibrated
+  static constexpr float VOLTAGE_DIVIDER_RATIO = 6.70f; // (R1 + R2) / R2, calibrated against ~4.0 V multimeter
+  static constexpr int ADC_SAMPLES = 4;                 // light averaging to tame jitter
+  static constexpr int ADC_SETTLE_MS = 50;              // recharge the high-impedance divider between reads
 
   float readBatteryVoltage()
   {
     pinMode(ADC_PIN, INPUT);
-    int mv = analogReadMilliVolts(ADC_PIN);
+    delay(ADC_SETTLE_MS); // let the divider node settle after wake before the first read
+    uint32_t sum = 0;
+    for (int i = 0; i < ADC_SAMPLES; i++)
+    {
+      sum += analogReadMilliVolts(ADC_PIN);
+      delay(ADC_SETTLE_MS); // critical: back-to-back reads drain the divider and sag the value low
+    }
+    int mv = sum / ADC_SAMPLES;
     float v = (mv / 1000.0f) * VOLTAGE_DIVIDER_RATIO;
-    Serial.printf("Battery: %d mV raw, %.2f V\n", mv, v);
+    Serial.printf("Battery: %d mV raw (avg of %d), %.2f V\n", mv, ADC_SAMPLES, v);
     return v;
   }
 

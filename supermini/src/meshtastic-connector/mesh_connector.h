@@ -24,6 +24,7 @@ public:
   {
     led.begin();
     pairing.begin(MESH_BLE_MAC, MESH_BLE_PIN);
+    node.setHopLimit(MESH_HOP_LIMIT); // non-zero => skip config; 0 => read it from the node
 
     for (uint8_t attempt = 1; attempt <= attempts; attempt++)
     {
@@ -49,9 +50,10 @@ public:
     node.sendTelemetry(MESH_DEST_ID, temp, humidity, pressure, voltage, destChannel());
   }
 
-  // Show the outcome LED for 10 s (green = sent, red = error), then go dark
-  // and deep-sleep for the configured interval. A failed search sleeps at once.
-  void sleepForInterval()
+  // Show the outcome LED for 10 s (green = sent, red = error), then go dark and
+  // deep-sleep for `timerSeconds` (time remaining until the next telemetry is
+  // due — NOT a fresh full interval). A failed search sleeps at once.
+  void sleepForInterval(uint32_t timerSeconds)
   {
     if (result == RESULT_CONNECTED || result == RESULT_ERROR)
       holdFor(PHASE_MS); // solid green or red, 10 s
@@ -62,13 +64,13 @@ public:
     if (client && client->isConnected())
       client->disconnect();
 
-    armAndSleep();
+    armAndSleep(timerSeconds);
   }
 
   // Deep-sleep right away without touching the LED or BLE — used when we decide
   // not to send (e.g. a debounced PIR wake). The LED stays held dark from the
-  // previous sleep.
-  void sleepNow() { armAndSleep(); }
+  // previous sleep. Sleeps for `timerSeconds` (remaining until telemetry is due).
+  void sleepNow(uint32_t timerSeconds) { armAndSleep(timerSeconds); }
 
 private:
   enum WakeResult
@@ -103,7 +105,12 @@ private:
           result = RESULT_ERROR;
           return false;
         }
-        waitForConfig();
+        // Only run the want_config handshake when we actually need it (hop limit
+        // configured as 0). Otherwise skip it — the node only streams its
+        // (potentially huge) node DB when asked, and we need none of it to send
+        // to a channel, so skipping saves up to CONFIG_TIMEOUT_MS per wake.
+        if (!node.hopLimitKnown())
+          waitForConfig();
         result = RESULT_CONNECTED;
         return true;
 
@@ -125,8 +132,8 @@ private:
     return false;
   }
 
-  // Request the node config and drain it until done (or a timeout); the node
-  // accepts our packets once this handshake is underway.
+  // Request the node config and drain it until done (or a timeout). Only needed
+  // when the hop limit wasn't pre-configured (MESH_HOP_LIMIT == 0).
   void waitForConfig()
   {
     node.requestConfig();
@@ -155,14 +162,16 @@ private:
     }
   }
 
-  void armAndSleep()
+  void armAndSleep(uint32_t timerSeconds)
   {
-    Serial.printf("Deep sleeping for %d min...\n", MESH_SEND_INTERVAL_MIN);
+    if (timerSeconds < 1)
+      timerSeconds = 1;
+    Serial.printf("Deep sleeping for %lu s...\n", (unsigned long)timerSeconds);
     Serial.flush();
     delay(50);
 
-    // Wake on either the interval timer, or motion (PIR drives wakeupPin HIGH).
-    esp_sleep_enable_timer_wakeup((uint64_t)MESH_SEND_INTERVAL_MIN * 60ULL * 1000000ULL);
+    // Wake on either the telemetry timer, or motion (PIR drives wakeupPin HIGH).
+    esp_sleep_enable_timer_wakeup((uint64_t)timerSeconds * 1000000ULL);
     esp_sleep_enable_ext1_wakeup(1ULL << wakeupPin, ESP_EXT1_WAKEUP_ANY_HIGH);
     esp_deep_sleep_start();
   }

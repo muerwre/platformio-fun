@@ -1,6 +1,5 @@
 #pragma once
 #include <NimBLEDevice.h>
-#include <esp_random.h>
 #include "proto_reader.h"
 #include "proto_writer.h"
 
@@ -122,6 +121,13 @@ public:
 
   bool isComplete() const { return complete; }
 
+  // Pre-seed the hop limit from config. Non-zero => fixed value, no need to read
+  // the node's config. Zero => we'll learn it from the node's LoRa config.
+  void setHopLimit(uint8_t h) { hopLimit = h; }
+
+  // True once we have a hop limit to use (either pre-seeded or read from config).
+  bool hopLimitKnown() const { return hopLimit != 0; }
+
 private:
   // Meshtastic BLE GATT UUIDs
   static constexpr const char *SERVICE_UUID = "6ba1b218-15a8-461f-9fa8-5dcae273eafd";
@@ -133,7 +139,8 @@ private:
   static constexpr int MAX_READS_PER_POLL = 64;
   static constexpr uint32_t PORTNUM_TEXT_MESSAGE = 1; // PortNum.TEXT_MESSAGE_APP
   static constexpr uint32_t PORTNUM_TELEMETRY = 67;   // PortNum.TELEMETRY_APP
-  static constexpr uint32_t DEFAULT_HOPS = 3;
+  static constexpr uint32_t DEFAULT_HOPS = 3;         // used if we asked for config but it never arrived
+  static constexpr uint32_t MAX_HOPS = 7;             // protocol ceiling
 
   // Build ToRadio{ MeshPacket{ Data{ portnum, payload } } } and write it.
   void sendData(uint32_t dest, uint8_t channel, uint32_t portnum,
@@ -145,18 +152,15 @@ private:
     data.varint(1, portnum);
     data.bytes(2, payload, payloadLen);
 
-    // MeshPacket{ to, channel, id, hop_limit, want_ack, decoded = Data }
+    // MeshPacket{ to, channel, hop_limit, want_ack, decoded = Data }
     uint8_t pktBuf[128];
     ProtoWriter pkt(pktBuf, sizeof(pktBuf));
     bool broadcast = (dest == BROADCAST_ADDR);
-    uint32_t id = esp_random(); // must be unique per message — the node drops
-    if (id == 0)                // duplicate ids as "already seen recently"
-      id = 1;
     pkt.fixed32(2, dest);        // to (0xFFFFFFFF = channel broadcast)
     if (channel != 0)            // proto3 omits the zero default
       pkt.varint(3, channel);    // channel index
-    pkt.fixed32(6, id);          // packet id (random, non-zero)
-    pkt.varint(9, DEFAULT_HOPS); // hop_limit
+    uint32_t hops = hopLimit ? hopLimit : DEFAULT_HOPS;
+    pkt.varint(9, hops);         // hop_limit (configured value, or read from node config)
     if (!broadcast)              // ack only makes sense for direct messages
       pkt.varint(10, 1);         // want_ack
     pkt.message(4, data);        // decoded
@@ -167,8 +171,8 @@ private:
     out.message(1, pkt);
 
     bool ok = toRadio->writeValue(out.data(), out.size(), true);
-    Serial.printf("MeshNode: sent %s to !%08x on ch%u (id=0x%08x) [%u bytes, ok=%d]\n",
-                  label, dest, channel, id, (unsigned)out.size(), ok);
+    Serial.printf("MeshNode: sent %s to !%08x on ch%u (id=node-assigned) [%u bytes, ok=%d]\n",
+                  label, dest, channel, (unsigned)out.size(), ok);
   }
 
   // FromRadio field numbers (payload_variant oneof)
@@ -176,6 +180,7 @@ private:
   {
     F_MY_INFO = 3,
     F_NODE_INFO = 4,
+    F_CONFIG = 5,
     F_CONFIG_COMPLETE_ID = 7,
     F_METADATA = 13,
   };
@@ -199,6 +204,12 @@ private:
         const uint8_t *b = r.readBytes(l);
         decodeNodeInfo(b, l);
       }
+      else if (field == F_CONFIG && wt == 2)
+      {
+        size_t l;
+        const uint8_t *b = r.readBytes(l);
+        decodeConfig(b, l);
+      }
       else if (field == F_METADATA && wt == 2)
       {
         size_t l;
@@ -215,6 +226,46 @@ private:
       {
         r.skip(wt);
       }
+    }
+  }
+
+  // Config{ lora = 6 (LoRaConfig) } — we only care about the LoRa hop limit.
+  void decodeConfig(const uint8_t *data, size_t len)
+  {
+    ProtoReader r(data, len);
+    uint32_t field;
+    uint8_t wt;
+    while (r.nextField(field, wt))
+    {
+      if (field == 6 && wt == 2) // Config.lora
+      {
+        size_t l;
+        const uint8_t *b = r.readBytes(l);
+        decodeLoRaConfig(b, l);
+      }
+      else
+        r.skip(wt);
+    }
+  }
+
+  // LoRaConfig{ hop_limit = 8 }. Only adopt an explicit, in-range value; if it's
+  // absent/0 we fall back to DEFAULT_HOPS at send time (sending 0 = local only).
+  void decodeLoRaConfig(const uint8_t *data, size_t len)
+  {
+    ProtoReader r(data, len);
+    uint32_t field;
+    uint8_t wt;
+    while (r.nextField(field, wt))
+    {
+      if (field == 8 && wt == 0) // hop_limit
+      {
+        uint32_t h = (uint32_t)r.readVarint();
+        if (h > 0 && h <= MAX_HOPS)
+          hopLimit = h;
+        Serial.printf("  [LoRaConfig] hop_limit=%u (using %u)\n", h, hopLimit);
+      }
+      else
+        r.skip(wt);
     }
   }
 
@@ -310,4 +361,5 @@ private:
   NimBLERemoteCharacteristic *fromNum = nullptr;
   volatile bool dataReady = false;
   bool complete = false;
+  uint8_t hopLimit = 0; // 0 = unknown; set via setHopLimit() or read from LoRa config
 };

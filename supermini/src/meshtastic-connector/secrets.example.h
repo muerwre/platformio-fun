@@ -16,3 +16,8 @@
 
 // Minutes of deep sleep between messages (e.g. 60 = once per hour; use 1 for debugging)
 #define MESH_SEND_INTERVAL_MIN 60
+
+// Hop limit for outgoing packets (max 7). A fixed value lets us skip the slow
+// node-config handshake entirely. Set to 0 to instead read the node's own
+// LoRa hop_limit on connect (adds the config dump's latency).
+#define MESH_HOP_LIMIT 7

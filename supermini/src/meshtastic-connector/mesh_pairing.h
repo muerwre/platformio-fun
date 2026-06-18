@@ -98,11 +98,13 @@ private:
   struct ClientCb : public NimBLEClientCallbacks
   {
     uint32_t pin = 0;
+    volatile int disconnectReason = 0; // last HCI disconnect reason, for bond diagnosis
 
     void onConnect(NimBLEClient *) override { Serial.println("BLE link up"); }
 
     void onDisconnect(NimBLEClient *, int reason) override
     {
+      disconnectReason = reason;
       Serial.printf("BLE link down, reason=%d\n", reason);
     }
 
@@ -144,32 +146,55 @@ private:
                            : "No bond, starting secure pairing...");
 
     // secureConnection() re-uses the stored bond when one exists (no PIN), or
-    // runs the full PIN pairing otherwise. If a bond we thought was valid is
-    // rejected, the node likely forgot us — drop it and pair fresh once.
-    if (!client->secureConnection())
+    // runs the full PIN pairing otherwise.
+    clientCb.disconnectReason = 0; // clear before, so we read this attempt's reason
+    bool secured = client->secureConnection();
+
+    // secureConnection() can return true while the link is still not encrypted:
+    // re-encrypting from a bond the node has silently dropped is "accepted" then
+    // comes up empty. Treat that the same as an outright secure failure below so
+    // we don't keep retrying with a key the node no longer honours.
+    if (!secured || !client->getConnInfo().isEncrypted())
     {
-      if (hadBond)
+      delay(50); // let the disconnect callback land so the reason is current
+
+      // Dropping the bond is expensive (forces full PIN pairing, needs the node
+      // in "Fixed PIN" mode) so we only do it when the node has genuinely
+      // forgotten our key. The controller signals that with "PIN or Key Missing"
+      // (HCI 0x06) or "Authentication Failure" (0x05) — or, with no error at all,
+      // by claiming success while the link never actually encrypted. Any other
+      // failure — a supervision timeout, a transient SMP hiccup — keeps the bond
+      // intact and is left to the caller's connect() retry loop to re-attempt.
+      bool bondForgotten =
+          hadBond &&
+          (secured || // claimed success but unencrypted => stale bond
+           clientCb.disconnectReason == BLE_HS_HCI_ERR(BLE_ERR_PINKEY_MISSING) ||
+           clientCb.disconnectReason == BLE_HS_HCI_ERR(BLE_ERR_AUTH_FAIL));
+
+      if (!bondForgotten)
       {
-        Serial.println("Stale bond rejected, deleting and re-pairing...");
-        NimBLEDevice::deleteBond(addr);
-        client->disconnect();
-        delay(100);
-        if (!client->connect(addr))
-        {
-          Serial.println("Reconnect failed");
-          NimBLEDevice::deleteClient(client);
-          return false;
-        }
-        client->updateConnParams(12, 12, 0, 400);
-        delay(100);
-        if (!client->secureConnection())
-        {
-          Serial.println("Pairing failed");
+        Serial.printf("Secure link failed (reason=%d), keeping bond for retry\n",
+                      clientCb.disconnectReason);
+        if (client->isConnected())
           client->disconnect();
-          return false;
-        }
+        return false;
       }
-      else
+
+      Serial.printf("Node forgot our bond (reason=%d), deleting and re-pairing...\n",
+                    clientCb.disconnectReason);
+      if (client->isConnected())
+        client->disconnect();
+      NimBLEDevice::deleteBond(addr);
+      delay(100);
+      if (!client->connect(addr))
+      {
+        Serial.println("Reconnect failed");
+        NimBLEDevice::deleteClient(client);
+        return false;
+      }
+      client->updateConnParams(12, 12, 0, 400);
+      delay(100);
+      if (!client->secureConnection() || !client->getConnInfo().isEncrypted())
       {
         Serial.println("Pairing failed");
         client->disconnect();
