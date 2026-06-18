@@ -58,17 +58,16 @@ void setup()
     return;
   }
 
-  // Read sensors before BLE starts — I2C and NimBLE conflict on ESP32-C6
-  // if the bus is still active when the radio initialises.
-  bool sensorOk = false;
+  // Read sensors before BLE starts — I2C and NimBLE conflict on ESP32-C6 if the
+  // bus is still active when the radio initialises. We read on every wake (not
+  // just timer wakes) so a motion wake can piggyback telemetry on the same
+  // session: during an intruder storm the timer wake is repeatedly postponed,
+  // so this is what keeps telemetry flowing.
+  bool sensorOk = sensors.begin();
   SensorReading reading;
-  if (!motion)
-  {
-    sensorOk = sensors.begin();
-    if (sensorOk)
-      reading = sensors.read();
-    Wire.end(); // release I2C before BLE init
-  }
+  if (sensorOk)
+    reading = sensors.read();
+  Wire.end(); // release I2C before BLE init
 
   if (mesh.connect())
   {
@@ -81,14 +80,18 @@ void setup()
       snprintf(message, sizeof(message), "Intruder! (nonce: %lu)", (unsigned long)(uint32_t)now);
       mesh.send(message);
     }
-    else if (sensorOk)
+
+    // Telemetry follows in the same session — the point of a timer wake, and on
+    // a motion wake it stops telemetry from being starved by the PIR.
+    if (sensorOk)
     {
       mesh.sendTelemetry(reading.temperature, reading.humidity, reading.pressure, reading.voltage);
       Serial.printf("Sent: temp=%.2f°C hum=%.2f%% pres=%.2fhPa volt=%.3fV\n",
                     reading.temperature, reading.humidity, reading.pressure, reading.voltage);
     }
-    else
+    else if (!motion)
     {
+      // Nothing else to report on a plain timer wake — flag the bad read.
       mesh.send("sensor error");
     }
   }

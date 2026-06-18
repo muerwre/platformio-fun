@@ -16,47 +16,24 @@ public:
       : led(ledPin), wakeupPin(wakeupPin) {}
 
   // Pair, bond and get the protocol ready. Drives the status LED.
-  // Searches for at most 10 s; returns true when it's safe to send().
-  bool connect()
+  // Each attempt searches for at most 10 s; on a miss or a BLE glitch we retry
+  // up to `attempts` times before giving up. A single failed wake would
+  // otherwise mean a whole interval (an hour) of silence, so retrying here is
+  // much cheaper than waiting for the next timer wake.
+  bool connect(uint8_t attempts = 3)
   {
     led.begin();
     pairing.begin(MESH_BLE_MAC, MESH_BLE_PIN);
-    pairing.startSearching();
 
-    uint32_t start = millis();
-    while (millis() - start < PHASE_MS)
+    for (uint8_t attempt = 1; attempt <= attempts; attempt++)
     {
-      led.update();
-      switch (pairing.update())
-      {
-      case MeshPairing::PAIRED:
-        led.setMode(StatusLed::PAIRED); // solid green
-        led.update();
-        if (!node.begin(pairing.getClient()))
-        {
-          led.setMode(StatusLed::PAIR_ERROR);
-          result = RESULT_ERROR;
-          return false;
-        }
-        waitForConfig();
-        result = RESULT_CONNECTED;
+      Serial.printf("Connect attempt %u/%u\n", attempt, attempts);
+      if (attemptConnect())
         return true;
-
-      case MeshPairing::FAILED:
-        led.setMode(StatusLed::PAIR_ERROR); // solid red
-        result = RESULT_ERROR;
-        return false;
-
-      case MeshPairing::SEARCHING:
-      default:
-        led.setMode(StatusLed::SEARCHING); // blue blinking
-        break;
-      }
-      delay(10);
+      if (attempt < attempts)
+        delay(RETRY_DELAY_MS); // brief settle before re-scanning
     }
 
-    // Never found the node within the search window.
-    result = RESULT_NOT_FOUND;
     return false;
   }
 
@@ -103,6 +80,50 @@ private:
 
   static constexpr uint32_t PHASE_MS = 10000;          // search budget / LED hold
   static constexpr uint32_t CONFIG_TIMEOUT_MS = 10000; // give up on config dump after this
+  static constexpr uint32_t RETRY_DELAY_MS = 500;      // settle time between connect attempts
+
+  // One search-and-pair pass: scan up to PHASE_MS, and on a hit bond + open the
+  // protocol. Sets `result` and returns true only when it's safe to send().
+  bool attemptConnect()
+  {
+    pairing.startSearching();
+
+    uint32_t start = millis();
+    while (millis() - start < PHASE_MS)
+    {
+      led.update();
+      switch (pairing.update())
+      {
+      case MeshPairing::PAIRED:
+        led.setMode(StatusLed::PAIRED); // solid green
+        led.update();
+        if (!node.begin(pairing.getClient()))
+        {
+          led.setMode(StatusLed::PAIR_ERROR);
+          result = RESULT_ERROR;
+          return false;
+        }
+        waitForConfig();
+        result = RESULT_CONNECTED;
+        return true;
+
+      case MeshPairing::FAILED:
+        led.setMode(StatusLed::PAIR_ERROR); // solid red
+        result = RESULT_ERROR;
+        return false;
+
+      case MeshPairing::SEARCHING:
+      default:
+        led.setMode(StatusLed::SEARCHING); // blue blinking
+        break;
+      }
+      delay(10);
+    }
+
+    // Never found the node within the search window.
+    result = RESULT_NOT_FOUND;
+    return false;
+  }
 
   // Request the node config and drain it until done (or a timeout); the node
   // accepts our packets once this handshake is underway.
