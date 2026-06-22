@@ -99,12 +99,10 @@ void setup()
   {
     if (motion && !suppressedIntruder)
     {
-      // PIR wakeup -> intruder text alert.
+      // PIR wakeup -> detection sensor alert (DETECTION_SENSOR_APP).
       lastIntruderSec = now;
       intruderSent = true;
-      char message[48];
-      snprintf(message, sizeof(message), "Intruder! (nonce: %lu)", (unsigned long)(uint32_t)now);
-      mesh.send(message);
+      mesh.sendDetection("Main Entrance Open");
     }
 
     // Telemetry follows in the same session. Sending fresh telemetry — whether

@@ -44,6 +44,12 @@ public:
     node.sendText(MESH_DEST_ID, text, destChannel());
   }
 
+  // Send a detection event (DETECTION_SENSOR_APP) with the given sensor name.
+  void sendDetection(const char *name)
+  {
+    node.sendDetection(MESH_DEST_ID, name, destChannel());
+  }
+
   // Send temp/humidity/pressure/voltage as a telemetry (EnvironmentMetrics) packet.
   void sendTelemetry(float temp, float humidity, float pressure, float voltage)
   {

@@ -74,6 +74,15 @@ public:
              (const uint8_t *)text, strlen(text), text);
   }
 
+  // Send a detection event (DETECTION_SENSOR_APP). The payload is plain ASCII
+  // text — the sensor name, e.g. "Main Entrance" — same as the firmware's
+  // Detection Sensor Module emits on a trigger.
+  void sendDetection(uint32_t dest, const char *name, uint8_t channel = 0)
+  {
+    sendData(dest, channel, PORTNUM_DETECTION_SENSOR,
+             (const uint8_t *)name, strlen(name), name);
+  }
+
   // Send temperature/humidity/pressure/voltage as an EnvironmentMetrics telemetry packet.
   // NAN fields are omitted (e.g. no BMP280 -> no pressure).
   // Voltage is stuffed into the lux field (9) to avoid colliding with the parent node.
@@ -137,8 +146,9 @@ private:
 
   static constexpr uint32_t CONFIG_NONCE = 0x1A2B3C4D;
   static constexpr int MAX_READS_PER_POLL = 64;
-  static constexpr uint32_t PORTNUM_TEXT_MESSAGE = 1; // PortNum.TEXT_MESSAGE_APP
-  static constexpr uint32_t PORTNUM_TELEMETRY = 67;   // PortNum.TELEMETRY_APP
+  static constexpr uint32_t PORTNUM_TEXT_MESSAGE = 1;     // PortNum.TEXT_MESSAGE_APP
+  static constexpr uint32_t PORTNUM_DETECTION_SENSOR = 10; // PortNum.DETECTION_SENSOR_APP
+  static constexpr uint32_t PORTNUM_TELEMETRY = 67;       // PortNum.TELEMETRY_APP
   static constexpr uint32_t DEFAULT_HOPS = 3;         // used if we asked for config but it never arrived
   static constexpr uint32_t MAX_HOPS = 7;             // protocol ceiling
 
