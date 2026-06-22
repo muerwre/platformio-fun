@@ -36,12 +36,28 @@ Once the node DB is read, we send a `"Hello"` text message to `MESH_DEST_ID`
 
 ### Files
 
-- `main.cpp` — state machine (search → pair → read info → say hello → retry)
+The reusable boilerplate lives in `lib/MeshConnector/` (shared by every device env):
+
+- `mesh_connector.h` — the deep-sleep duty cycle: wake → decide → connect → send → sleep,
+  plus telemetry scheduling and per-trigger debounce. The only class an app touches.
+- `telemetry.h` — `Telemetry` struct + `TelemetryProvider` callback type
 - `status_led.h` — non-blocking RGB LED states
 - `mesh_pairing.h` — NimBLE scan + connect + PIN bonding
-- `mesh_node.h` — Meshtastic GATT protocol: request config, decode info, send text
+- `mesh_node.h` — Meshtastic GATT protocol: request config, decode info, send text/detection/telemetry
 - `proto_reader.h` / `proto_writer.h` — minimal protobuf wire-format codec
-- `secrets.h` — node MAC, PIN and dest id (git-ignored)
+
+Per-device, in this folder:
+
+- `main.cpp` — declarative config (`mesh.setNode(...)`, `addWakeupTrigger(...)`, `onTelemetry(...)`, `run()`)
+- `sensors.h` — this device's sensors (AHT20 + BMP280 + battery ADC)
+- `secrets.h` — node MAC, PIN, dest id, interval (git-ignored)
+
+### Reusing for a new device
+
+1. Add `src/<new-device>/main.cpp` + its own `sensors.h` / `secrets.h`.
+2. `#include <mesh_connector.h>`, wire up triggers and/or `onTelemetry`, call `mesh.run()`.
+3. Add an `[env:<new-device>]` in `platformio.ini` with only that device's sensor `lib_deps`
+   (NimBLE + NeoPixel come transitively from `lib/MeshConnector/library.json`).
 
 ### Finding device (in linux)
 

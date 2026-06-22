@@ -2,6 +2,7 @@
 #include <NimBLEDevice.h>
 #include "proto_reader.h"
 #include "proto_writer.h"
+#include "telemetry.h"
 
 // Talks the Meshtastic BLE protocol over an already-bonded client.
 //
@@ -83,26 +84,39 @@ public:
              (const uint8_t *)name, strlen(name), name);
   }
 
-  // Send temperature/humidity/pressure/voltage as an EnvironmentMetrics telemetry packet.
-  // NAN fields are omitted (e.g. no BMP280 -> no pressure).
-  // Voltage is stuffed into the lux field (9) to avoid colliding with the parent node.
-  void sendTelemetry(uint32_t dest, float temp, float humidity, float pressure,
-                     float voltage, uint8_t channel = 0)
+  // Send a Telemetry sample as an EnvironmentMetrics packet. Every field set on
+  // `t` is serialised to its EnvironmentMetrics field number; unset fields (NAN
+  // floats / UNSET_U32 ints) are omitted, exactly as proto3 would.
+  void sendTelemetry(uint32_t dest, const Telemetry &t, uint8_t channel = 0)
   {
-    // EnvironmentMetrics{ temperature=1, relative_humidity=2, barometric_pressure=3, lux=9 }
-    uint8_t envBuf[40];
+    // EnvironmentMetrics — field numbers per telemetry.proto (see telemetry.h).
+    uint8_t envBuf[160]; // worst case ~115 B with every field populated
     ProtoWriter env(envBuf, sizeof(envBuf));
-    if (!isnan(temp))
-      env.float32(1, temp);
-    if (!isnan(humidity))
-      env.float32(2, humidity);
-    if (!isnan(pressure))
-      env.float32(3, pressure);
-    if (!isnan(voltage))
-      env.float32(9, voltage);
+    putFloat(env, 1, t.temperature);
+    putFloat(env, 2, t.humidity);
+    putFloat(env, 3, t.pressure);
+    putFloat(env, 4, t.gasResistance);
+    putFloat(env, 5, t.voltage);
+    putFloat(env, 6, t.current);
+    putUint(env, 7, t.iaq);
+    putFloat(env, 8, t.distance);
+    putFloat(env, 9, t.lux);
+    putFloat(env, 10, t.whiteLux);
+    putFloat(env, 11, t.irLux);
+    putFloat(env, 12, t.uvLux);
+    putUint(env, 13, t.windDirection);
+    putFloat(env, 14, t.windSpeed);
+    putFloat(env, 15, t.weight);
+    putFloat(env, 16, t.windGust);
+    putFloat(env, 17, t.windLull);
+    putFloat(env, 18, t.radiation);
+    putFloat(env, 19, t.rainfall1h);
+    putFloat(env, 20, t.rainfall24h);
+    putUint(env, 21, t.soilMoisture);
+    putFloat(env, 22, t.soilTemperature);
 
     // Telemetry{ environment_metrics = 3 }
-    uint8_t telBuf[48];
+    uint8_t telBuf[176];
     ProtoWriter tel(telBuf, sizeof(telBuf));
     tel.message(3, env);
 
@@ -152,18 +166,31 @@ private:
   static constexpr uint32_t DEFAULT_HOPS = 3;         // used if we asked for config but it never arrived
   static constexpr uint32_t MAX_HOPS = 7;             // protocol ceiling
 
+  // Write one EnvironmentMetrics field only if it carries a value (proto3 omits
+  // defaults; here "unset" is NAN for floats / Telemetry::UNSET_U32 for ints).
+  static void putFloat(ProtoWriter &w, uint32_t field, float v)
+  {
+    if (!isnan(v))
+      w.float32(field, v);
+  }
+  static void putUint(ProtoWriter &w, uint32_t field, uint32_t v)
+  {
+    if (v != Telemetry::UNSET_U32)
+      w.varint(field, v);
+  }
+
   // Build ToRadio{ MeshPacket{ Data{ portnum, payload } } } and write it.
   void sendData(uint32_t dest, uint8_t channel, uint32_t portnum,
                 const uint8_t *payload, size_t payloadLen, const char *label)
   {
     // Data{ portnum, payload }
-    uint8_t dataBuf[96];
+    uint8_t dataBuf[224];
     ProtoWriter data(dataBuf, sizeof(dataBuf));
     data.varint(1, portnum);
     data.bytes(2, payload, payloadLen);
 
     // MeshPacket{ to, channel, hop_limit, want_ack, decoded = Data }
-    uint8_t pktBuf[128];
+    uint8_t pktBuf[256];
     ProtoWriter pkt(pktBuf, sizeof(pktBuf));
     bool broadcast = (dest == BROADCAST_ADDR);
     pkt.fixed32(2, dest);        // to (0xFFFFFFFF = channel broadcast)
@@ -176,7 +203,7 @@ private:
     pkt.message(4, data);        // decoded
 
     // ToRadio{ packet = MeshPacket }
-    uint8_t outBuf[160];
+    uint8_t outBuf[288];
     ProtoWriter out(outBuf, sizeof(outBuf));
     out.message(1, pkt);
 
