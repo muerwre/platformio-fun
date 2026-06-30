@@ -92,9 +92,27 @@ public:
   {
     int64_t now = secondsSinceStart();
 
+    // Detect a clock reset. Across deep sleep the wall clock only moves forward,
+    // but a crash, brownout, watchdog or reflash restarts it from ~0 while our
+    // RTC-stored deadlines (nextTelemetrySec, per-trigger cooldowns) keep their
+    // large values. Left alone, every wake would see `now < nextTelemetrySec` and
+    // refuse to report until `now` slowly climbs back to the stale deadline —
+    // stalling for hours. If time jumped backwards, drop the stale state so the
+    // node re-anchors to the new clock (and re-announces, like a fresh boot).
+    if (now < lastWakeSec)
+    {
+      Serial.printf("Clock reset detected (now=%llds < last=%llds); re-anchoring timers\n",
+                    (long long)now, (long long)lastWakeSec);
+      nextTelemetrySec = 0;
+      for (uint8_t i = 0; i < MAX_TRIGGERS; i++)
+        triggerState[i] = {0, false};
+      lastWakeSec = 0;
+    }
+
     // nextTelemetrySec == 0 means we've never sent telemetry: this is the cold
-    // boot (or the device was just reflashed). Announce ourselves immediately —
-    // like the pre-refactor firmware did — then settle into the interval.
+    // boot (or the device was just reflashed / its clock was reset above).
+    // Announce ourselves immediately — like the pre-refactor firmware did — then
+    // settle into the interval.
     bool firstBoot = (nextTelemetrySec == 0 && intervalSec > 0);
     if (firstBoot)
       nextTelemetrySec = now + intervalSec;
@@ -109,7 +127,17 @@ public:
     uint8_t fired[MAX_TRIGGERS];
     uint8_t firedCount = collectActiveTriggers(now, fired);
 
-    bool telemetryDue = intervalSec > 0 && (firstBoot || now >= nextTelemetrySec);
+    // A timer wake is telemetry-due *by construction*: we always sleep exactly
+    // secondsUntilTelemetry(), i.e. until the deadline, so if the TIMER (not a
+    // trigger pin) is what woke us, the deadline has arrived. We trust the wake
+    // cause rather than the wall clock here on purpose — gettimeofday is not
+    // guaranteed to survive every deep-sleep wake on this part, and the
+    // pre-refactor firmware never gated sends on it (it sent on every timer
+    // wake). The now-based check is kept as a secondary signal for when the
+    // clock *is* good (e.g. a trigger wake that also crossed the deadline).
+    bool timerWake = (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER);
+    bool telemetryDue =
+        intervalSec > 0 && (firstBoot || timerWake || now >= nextTelemetrySec);
 
     // Nothing to do this wake (e.g. a debounced re-trigger, no telemetry due):
     // go straight back to sleep without spinning up the radio. We never touch
